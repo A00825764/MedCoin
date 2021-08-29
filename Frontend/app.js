@@ -7,7 +7,7 @@ function createWindow () {
         height: 600,
         backgroundColor: '#000000'
     })
-    win.loadFile('./html/index.html')
+    win.loadFile('./html/login.html')
 }
 
 app.on('window-all-closed', function () {
@@ -22,4 +22,3 @@ app.whenReady().then(() => {
             createWindow()
     })
 })
-
