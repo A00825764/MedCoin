@@ -1,5 +1,5 @@
 const crypto = require('crypto')
-const Buffer = require('buffer')
+const {Buffer} = require('buffer')
 const http = require('http')
 const fs = require('fs')
 const path = require('path')
@@ -65,7 +65,7 @@ function AutodockVinaLite(protein, molecule, protOut) {
 class Block {
   constructor(...args) {
     if(args.length === 5) {
-      [previousHash, protOut, ownerPkey, blockHash, sign] = args
+      let [previousHash, protOut, ownerPkey, blockHash, sign] = args
       this.id = Math.floor(Math.random() * 0xffffffff)
       this.timestamp = Date.now()
       this.protOut = protOut
@@ -78,61 +78,63 @@ class Block {
       this.id = b.readUInt32LE(this.id, 0)
       this.timestamp = b.readBigUInt64LE(this.timestamp, 4)
       this.protOut = new ProteinOutput(
-        b.readFloatLE(this.protOut.x, 12),
-        b.readFloatLE(this.protOut.y, 16),
-        b.readFloatLE(this.protOut.z, 20),
-        b.readFloatLE(this.protOut.rx, 24),
-        b.readFloatLE(this.protOut.ry, 28),
-        b.readFloatLE(this.protOut.rz, 32)
+        b.readFloatLE(12),
+        b.readFloatLE(16),
+        b.readFloatLE(20),
+        b.readFloatLE(24),
+        b.readFloatLE(28),
+        b.readFloatLE(32)
       )
       this.ownerPkey = b.slice(36, 586)
-      this.blockHash = blockHash
-      this.sign = sign
+      this.blockHash = b.readUInt32LE(586)
+      this.sign = b.readBigUInt64LE(590)
     }
   }
 
   getBlock() {
-    let b = Buffer.alloc(598)
+    let b = Buffer.alloc(598);
     b.writeUInt32LE(this.id, 0)
-    b.writeBigUInt64LE(this.timestamp, 4)
+    b.writeBigUInt64LE(BigInt(this.timestamp), 4)
     b.writeFloatLE(this.protOut.x, 12)
     b.writeFloatLE(this.protOut.y, 16)
     b.writeFloatLE(this.protOut.z, 20)
     b.writeFloatLE(this.protOut.rx, 24)
     b.writeFloatLE(this.protOut.ry, 28)
     b.writeFloatLE(this.protOut.rz, 32)
-    b.write(this.ownerPkey.toString('base64'), 36, 550, 'base64')
+    b.write((this.ownerPkey.toString()), 36, 550)
     b.writeUInt32LE(this.blockHash, 586)
-    b.writeBigUInt64LE(this.sign, 590)
+    b.writeBigUInt64LE(BigInt(this.sign), 590)
     return b
   }
 
   getSignable() {
     let b = Buffer.alloc(554)
-    b.writeUInt32LE(this.previousHash || getPrevBlock().getHash(), 0)
+    b.writeUInt32LE(this.getHash(), 0)
     b.write(this.ownerPkey.toString('base64'), 4, 550, 'base64')
     return b
   }
 
   getSignableHash() {
-    return crypto.createHash('sha256').update(getSignable()).digest().readUInt32LE()
+    return crypto.createHash('sha256').update(this.getSignable()).digest().readUInt32LE()
   }
 
   getHash() {
-    return crypto.createHash('sha256').update(getBlock()).digest().readUInt32LE()
+    return crypto.createHash('sha256').update(this.getBlock()).digest().readUInt32LE()
   }
 
   transfer(newOwnerPkey, myPrivateKey) {
-    let hash = getSignableHash()
-    let protein = hash.readUInt8() & 31 // Choose random protein in the 32 item list
-    let molecule = hash.readUInt32LE() >> 5 // Choose random molecule, 2^251 options
-    let protOut = AutodockVina.run(protein, molecule)
-    let sign = crypto.createSign('SHA256').update(hash).end().sign(myPrivateKey).readBigUInt64LE()
+    let hash = this.getSignableHash()
+    let protein = hash & 31 // Choose random protein in the 32 item list
+    let molecule = hash >> 5 // Choose random molecule, 2^251 options
+    let protOut = AutodockVina(protein, molecule)
+    let buf = Buffer.alloc(4)
+    buf.writeUInt32LE(hash)
+    let sign = crypto.createSign('SHA256').update(buf).end().sign(myPrivateKey).readBigUInt64LE()
     return new Block(hash, protOut, newOwnerPkey, hash, sign)
   }
 
   getPrevBlock() {
-    let bc = blockchainStore[id]
+    let bc = blockchainStore[this.id]
     if(bc !== undefined) {
       return bc[bc.length - 1]
     } else {
@@ -141,44 +143,80 @@ class Block {
   }
 
   verify() {
-    let prev = getPrevBlock()
-    if(!crypto.createVerify('SHA256').update(prev.signedKey).end().verify(
+    let prev = this.getPrevBlock()
+    if(blockchainStore[this.id] && blockchainStore[this.id].length > 1 && !crypto.createVerify('SHA256').update(prev.signedKey).end().verify(
       "-----BEGIN PUBLIC KEY-----\n" +
       prev.publicKey.toString('base64') +
       "\n-----END PUBLIC KEY-----", prev.getSignableHash())) {
       return false
     }
 
-    let diff = Date.now - this.timestamp
-    if(diff > 600 || diff < 0) {
+    let diff = BigInt(Date.now()) - this.timestamp
+    if(diff > 600n || diff < 0n) {
       return false
     }
 
     let protein = this.previousHash.readUInt8() & 31
     let molecule = this.previousHash.readUInt32LE() >> 5
-    let energy = AutodockVinaLite.run(protein, molecule, protOut)
+    let energy = AutodockVinaLite(protein, molecule, protOut)
     if(energy > 1) {
       return false
     }
     return true
   }
 }
-/*
-module.exports = Block
-
-(function runTests() {
-  let previousHash = 0
-  let ownerPkey = 0
-  let previousHash = 0
-  let signedKey = 0
-  let protOut = new ProteinOutput(0, 0, 0, 0, 0, 0)
 
 
-  let block1 = new Block(previousHash, protOut, ownerPkey, blockHash, signedKey)
 
+let keys = crypto.generateKeyPairSync('rsa', {modulusLength: 4096, publicKeyEncoding: {type: 'spki', format: 'der'}, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }})
 
-  let newOwnerPkey = 1
-  let myPrivateKey = 10
-  block1.transfer(newOwnerPkey, myPrivateKey)
-  //let kp = crypto.generateKeyPairSync('rsa', {modulusLength: 4096, publicKeyEncoding: {type: 'spki', format: 'der'}, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }})
-})()*/
+// Backend example
+{
+  for(let i = 0; i < 20; i++) { //Generate 20 blocks and give them to that person
+    let b = new Block(
+      Math.floor(987654321*Math.random()),
+      new ProteinOutput(0,0,0,0,0,0),
+      keys.publicKey,
+      Math.floor(987654321*Math.random()),
+      Math.floor(987654321*Math.random())
+    )
+    blockchainStore[b.id] = b
+  }
+}
+function requestMyMedCoins(userKey) {
+  let coins = []
+  for(let i of Object.keys(blockchainStore)) {
+    let b = blockchainStore[i]
+    if(b.ownerPkey === userKey) {
+      coins.push(b.getBlock().toString('base64'))
+    }
+  }
+  return coins
+}
+function transferMedCoin(encoded) {
+  let b = new Block(Buffer.from(encoded, 'base64'))
+  if(b.verify()) {
+    blockchainStore[b.id].push(b)
+  }
+}
+
+// Frontend example
+{
+  let myPublicKey = keys.publicKey
+  let myPrivateKey = keys.privateKey
+  let myMedCoins = requestMyMedCoins(keys.publicKey)
+  let publicKeyOfFriend = 123456
+  let quantityToTransfer = 3
+  for(let i = myMedCoins.length - 1; i >= myMedCoins.length - quantityToTransfer; i--) {
+    let encoded = myMedCoins.pop()
+    if(encoded !== undefined) {
+      let b = new Block(Buffer.from(encoded, 'base64'))
+      let c = b.transfer(publicKeyOfFriend, myPrivateKey).getBlock()
+      transferMedCoin(c.toString('base64'))
+    }
+  }
+}
+
+console.log(blockchainStore)
+
+module.exports = { Block, blockchainStore }
