@@ -3,6 +3,7 @@ const Buffer = require('buffer')
 const http = require('http')
 const fs = require('fs')
 const path = require('path')
+const { spawn } = require('child_process')
 
 const rootdir = __dirname
 const proteinList = [
@@ -26,57 +27,68 @@ class ProteinOutput {
 }
 
 function loadProteins() {
-  fs.mkdir(path.resolve(rootdir, 'prots'))
-  for(let p of proteinList) {
-    http.get(`http://files.rcsb.org/download/${p}.pdb`, (res) => {
-      if(res.statusCode !== 200) {
-        console.warn(`Protein ${p} not loaded`)
-      } else {
-        let ws = fs.createWriteStream(path.resolve(rootdir, 'prots', `${p}.pdb`))
-        res.pipe(ws)
-        ws.on('close', () => {
-
-        })
-      }
-    })
+  try {
+    fs.mkdirSync(path.resolve(rootdir, 'pdb'))
+    fs.mkdirSync(path.resolve(rootdir, 'pdbqt'))
+    for(let p of proteinList) {
+      http.get(`http://files.rcsb.org/download/${p}.pdb`, (res) => {
+        if(res.statusCode !== 200) {
+          console.warn(`Protein ${p} not loaded`)
+        } else {
+          let ws = fs.createWriteStream(path.resolve(rootdir, 'pdb', `${p}.pdb`))
+          res.pipe(ws)
+          ws.on('close', () => {
+            spawn('python2', [
+              path.resolve(rootdir, '..',
+                'mgltools_1.5.7/MGLToolsPckgs/AutoDockTools/Utilities24/prepare_receptor4.py'),
+              '-r', path.resolve(rootdir, 'pdb', `${p}.pdb`),
+              '-o', path.resolve(rootdir, 'pdbqt', `${p}.pdbqt`)])
+          })
+        }
+      })
+    }
+  } catch(e) {
+    return
   }
 }
 
+loadProteins()
 
-function AutodockVina() {
-
+function AutodockVina(protein, molecule) {
+  return new ProteinOutput(1.1,1.2,1.3,0.1,0.2,0.3) // TODO: IMPLEMENT
 }
 
-function AutodockVinaLite() {
-
+function AutodockVinaLite(protein, molecule, protOut) {
+  return 0.1 // TODO: IMPLEMENT
 }
 
 class Block {
-  constructor(previousHash, protOut, ownerPkey, blockHash, sign) {
-    this.id = Math.floor(Math.random() * 0xffffffff)
-    this.timestamp = Date.now()
-    this.protOut = protOut
-    this.ownerPkey = ownerPkey
-    this.previousHash = previousHash
-    this.blockHash = blockHash
-    this.sign = sign
-  }
-
-  constructor(b) {
-    this.id = b.readUInt32LE(this.id, 0)
-    this.timestamp = b.readBigUInt64LE(this.timestamp, 4)
-    this.protOut = new ProteinOutput(
-      b.readFloatLE(this.protOut.x, 12),
-      b.readFloatLE(this.protOut.y, 16),
-      b.readFloatLE(this.protOut.z, 20),
-      b.readFloatLE(this.protOut.rx, 24),
-      b.readFloatLE(this.protOut.ry, 28),
-      b.readFloatLE(this.protOut.rz, 32)
-    )
-    this.ownerPkey = b.slice(36, 586)
-    this.previousHash = b.readUInt32LE(this.id, 0)
-    this.blockHash = blockHash
-    this.sign = sign
+  constructor(...args) {
+    if(args.length === 5) {
+      [previousHash, protOut, ownerPkey, blockHash, sign] = args
+      this.id = Math.floor(Math.random() * 0xffffffff)
+      this.timestamp = Date.now()
+      this.protOut = protOut
+      this.ownerPkey = ownerPkey
+      this.previousHash = previousHash
+      this.blockHash = blockHash
+      this.sign = sign
+    } else if(args.length === 1) {
+      let b = args[0]
+      this.id = b.readUInt32LE(this.id, 0)
+      this.timestamp = b.readBigUInt64LE(this.timestamp, 4)
+      this.protOut = new ProteinOutput(
+        b.readFloatLE(this.protOut.x, 12),
+        b.readFloatLE(this.protOut.y, 16),
+        b.readFloatLE(this.protOut.z, 20),
+        b.readFloatLE(this.protOut.rx, 24),
+        b.readFloatLE(this.protOut.ry, 28),
+        b.readFloatLE(this.protOut.rz, 32)
+      )
+      this.ownerPkey = b.slice(36, 586)
+      this.blockHash = blockHash
+      this.sign = sign
+    }
   }
 
   getBlock() {
@@ -97,7 +109,7 @@ class Block {
 
   getSignable() {
     let b = Buffer.alloc(554)
-    b.writeUInt32LE(this.previousHash, 0)
+    b.writeUInt32LE(this.previousHash || getPrevBlock().getHash(), 0)
     b.write(this.ownerPkey.toString('base64'), 4, 550, 'base64')
     return b
   }
@@ -129,10 +141,11 @@ class Block {
   }
 
   verify() {
-    if(!crypto.createVerify('SHA256').update(this.signedKey).end().verify(
+    let prev = getPrevBlock()
+    if(!crypto.createVerify('SHA256').update(prev.signedKey).end().verify(
       "-----BEGIN PUBLIC KEY-----\n" +
-      this.publicKey.toString('base64') +
-      "\n-----END PUBLIC KEY-----", this.verif)) {
+      prev.publicKey.toString('base64') +
+      "\n-----END PUBLIC KEY-----", prev.getSignableHash())) {
       return false
     }
 
@@ -141,34 +154,16 @@ class Block {
       return false
     }
 
-    let prot = this.previousHash.readUInt8() & 31
-    let mole = this.previousHash.readUInt32LE() >> 5
-    let energy = AutodockVinaLite.run(prot, mole, protOut)
-    if(energy > 100) {
+    let protein = this.previousHash.readUInt8() & 31
+    let molecule = this.previousHash.readUInt32LE() >> 5
+    let energy = AutodockVinaLite.run(protein, molecule, protOut)
+    if(energy > 1) {
       return false
     }
     return true
   }
 }
-
 /*
-class BlockChain {
-    constructor(genesis) {
-        this.chain = [this.createFirstBlock(genesis)]
-    }
-    createFirstBlock(genesis) {
-        return new Block(0,genesis)
-    }
-    getLastBlock() {
-        return this.chain[this.chain.length-1]
-    }
-    addBlock(data){
-        let prevBlock = this.getLastBlock()
-        let block = new Block(prevBlock+1, data, prevBlock.hash)
-    }
-}
-*/
-
 module.exports = Block
 
 (function runTests() {
@@ -186,4 +181,4 @@ module.exports = Block
   let myPrivateKey = 10
   block1.transfer(newOwnerPkey, myPrivateKey)
   //let kp = crypto.generateKeyPairSync('rsa', {modulusLength: 4096, publicKeyEncoding: {type: 'spki', format: 'der'}, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }})
-})()
+})()*/
