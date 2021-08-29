@@ -1,0 +1,33 @@
+
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Login</title>
+        <link rel="stylesheet" href="../CSS/styles.css">
+    </head>    
+    <body>
+        <form action="/login" method="POST">
+            <table>
+                <tr>
+                    <td colspan="2"><h1 class="txt1">Login</h1></td>
+                </tr>
+                <tr>
+                    <td><label for="email" class="txt">Email: </label></td>
+                    <td><input type="email" id="email" name="email" required></td>
+                </tr>
+                <tr>
+                    <td><label for="password" class="txt">Password: </label></td>
+                    <td><input type="password" id="password" name="password" required></td>
+                </tr>
+                <tr>
+                    <td colspan="2">
+                        <div class="buttons">
+                            <button type="submit" id="btnLog" class="btn">Login</button>
+                            <a href="./register.html" class="btn">Register</a>
+                        </div>
+                    </td>
+                </tr>
+            </table>
+        </form>
+    </body>
+</html>

@@ -1,0 +1,35 @@
+
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>MedCoin Wallet</title>
+        <link rel="stylesheet" href="../CSS/styles.css">
+    </head>    
+    <body>
+        <form action="/transfer" method="POST">
+            <table>
+                <tr>
+                    <td colspan="2"><h1 class="txt1">Hello User,</h1></td>
+                </tr>
+                <tr>
+                    <td><label for="name" class="txt">Your balance is: </label></td>
+                </tr>
+                <tr>
+                    <td><label for="transfer" class="txt">Transfer: </label></td>
+                    <td><input class="textbox" type="text" id="address"></td>
+                </tr>
+                <tr>
+                    <td><label for="amount" class="txt">Amount: </label></td>
+                    <td><input class="textbox" type="number" id="amount" max="10" min="0" value="0" step="1"></td>
+                </tr>
+                <tr>
+                    <td colspan="2">
+                        <div class="buttons">
+                            <button type="submit" id="btnSend" class="btn" onclick="transferMoney()">Send</button>
+                        </div>
+                    </td>
+                </tr>
+            </table>
+        </form>
+    </body>
+</html>
